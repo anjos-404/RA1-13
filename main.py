@@ -1,7 +1,14 @@
 import sys
 
+tokens = []
+memoria_vars = {}
+historico_res = []
+
 def parseExpressao(linha: str):
+
+    global tokens
     tokens = []
+
     i = 0
     n = len(linha)
 
@@ -35,7 +42,7 @@ def parseExpressao(linha: str):
                 token += c
             elif c == ".":
                 if tem_ponto:
-                    raise ValueError("Número malformado (dois pontos)")
+                    raise ValueError("Número errado contém (dois pontos)")
                 tem_ponto = True
                 token += c
             else:
@@ -51,6 +58,10 @@ def parseExpressao(linha: str):
     def estado_operador():
         nonlocal i
         token = linha[i]
+        
+        if linha[i:i+2] == "//":
+            i += 2
+            return "//"
         i += 1
         return token
 
@@ -64,7 +75,7 @@ def parseExpressao(linha: str):
         nonlocal i
         token = ""
 
-        while i < n and linha[i].isalpha():
+        while i < n and (linha[i].isalpha() or linha[i].isdigit()):
             token += linha[i]
             i += 1
 
@@ -80,14 +91,77 @@ def parseExpressao(linha: str):
 
         token = estado_inicial()
         tokens.append(token)
-        print(token)
 
     return tokens
 
+#--------------------- ALUNO 2 ---------------------------------#
 
-nome_arquivo = sys.argv[1]
 
-with open(nome_arquivo, "r") as arquivo:
-    for linha in arquivo:
-        linha = linha.strip()
-        parseExpressao(linha)
+def executarExpressao(tokens_rpn):
+    global historico_res, memoria_vars
+    
+    pilha_calc = []
+    
+    for t in tokens_rpn:
+        if t in "()":
+            raise ValueError(f"Expressão RPN inválida: não deve conter '{t}'")
+
+        if t.replace('.', '', 1).isdigit():
+            pilha_calc.append(float(t))
+            
+        elif t == "RES":
+            ultimo_valor = historico_res[-1] if historico_res else 0.0
+            pilha_calc.append(ultimo_valor)
+            
+        elif t == "MEM":
+            valor_salvo = memoria_vars.get("ultimo_salvo", 0.0)
+            pilha_calc.append(valor_salvo)
+            
+        elif t in "+-*///%^":
+            if len(pilha_calc) < 2:
+                raise ValueError("Expressão errada: faltam operandos!")
+                
+            b = pilha_calc.pop()
+            a = pilha_calc.pop()
+            
+            if t == '+': pilha_calc.append(a + b)
+            elif t == '-': pilha_calc.append(a - b)
+            elif t == '*': pilha_calc.append(a * b)
+            elif t == '/': pilha_calc.append(a / b)
+            elif t == '//': pilha_calc.append(a // b)
+            elif t == '%': pilha_calc.append(a % b)
+            elif t == '^': pilha_calc.append(a ** b)
+            
+    if len(pilha_calc) != 1:
+        raise ValueError(f"Expressão errada: sobraram operandos na pilha! (Pilha: {pilha_calc})")
+        
+    resultado_final = pilha_calc[0]
+    
+    historico_res.append(resultado_final)
+    
+    return resultado_final
+
+
+if __name__ == "__main__":
+
+    if len(sys.argv) < 2:
+        print("ERRO: Não foi passado o arquivo correto")
+        sys.exit(1)
+
+    nome_arquivo = sys.argv[1]
+    with open(nome_arquivo, "r", encoding='utf-8') as arquivo:
+        for linha in arquivo:
+            linha = linha.strip()
+            
+            if not linha or linha.startswith("#"):
+                continue
+            
+            try:
+                meus_tokens = parseExpressao(linha)
+                
+                resultado = executarExpressao(meus_tokens)
+
+                print(f"Correto: {linha}  =>  {resultado}")
+                
+            except Exception as e:
+                print(f"Erro na linha: '{linha}': {e}")
