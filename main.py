@@ -103,6 +103,13 @@ def executarExpressao(tokens_rpn):
     
     tokens = ['('] + tokens_rpn + [')']
     
+    def resolver_valor(val):
+        if isinstance(val, str):
+            if val == "RES":
+                return historico_res[-1] if historico_res else 0.0
+            return memoria_vars.get(val, 0.0)
+        return float(val)
+    
     for t in tokens:
         if t == '(':
             pilha_calc.append(t)
@@ -118,8 +125,11 @@ def executarExpressao(tokens_rpn):
 
             if len(elementos) == 1:
                 item = elementos[0]
-                if isinstance(item, str) and item.isupper() and item != "RES":
-                    pilha_calc.append(memoria_vars.get(item, 0.0))
+                if isinstance(item, str) and item.isupper():
+                    if item == "RES":
+                        pilha_calc.append(historico_res[-1] if historico_res else 0.0)
+                    else:
+                        pilha_calc.append(memoria_vars.get(item, 0.0))
                 else:
                     pilha_calc.append(item)
                     
@@ -128,7 +138,6 @@ def executarExpressao(tokens_rpn):
                 
                 if var_name == "RES":
                     n = int(v) if not isinstance(v, str) else 0
-                
                     idx = -(n + 1) 
 
                     if abs(idx) <= len(historico_res):
@@ -156,9 +165,11 @@ def executarExpressao(tokens_rpn):
         elif t in "+-*///%^":
             if len(pilha_calc) < 2 or pilha_calc[-1] == '(' or pilha_calc[-2] == '(':
                 raise ValueError(f"Erro: faltam operandos para '{t}'!")
-                
-            b = pilha_calc.pop()
-            a = pilha_calc.pop()
+            b_raw = pilha_calc.pop()
+            a_raw = pilha_calc.pop()
+            
+            b = resolver_valor(b_raw)
+            a = resolver_valor(a_raw)
             
             if t == '+': pilha_calc.append(a + b)
             elif t == '-': pilha_calc.append(a - b)
@@ -174,7 +185,7 @@ def executarExpressao(tokens_rpn):
     if len(pilha_calc) != 1:
         raise ValueError(f"Erro: sobraram operandos na pilha! (Pilha: {pilha_calc})")
         
-    resultado_final = pilha_calc[0]
+    resultado_final = resolver_valor(pilha_calc[0])
     historico_res.append(resultado_final)
     
     return resultado_final
@@ -289,13 +300,13 @@ if __name__ == "__main__":
             try:
                 meus_tokens = parseExpressao(linha)
                 resultado = executarExpressao(meus_tokens)
-                
+                print(resultado)
                 codigo_asm = []
-                gerarAssembly(meus_tokens, codigo_asm)
+                # gerarAssembly(meus_tokens, codigo_asm)
                 
-                for linha_asm in codigo_asm:
-                    print(linha_asm)
-                print("-" * 40)
+                # for linha_asm in codigo_asm:
+                #     print(linha_asm)
+                # print("-" * 40)
                 
             except Exception as e:
                 print(f"Erro na linha '{linha}': {e}")
