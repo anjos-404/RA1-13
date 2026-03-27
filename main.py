@@ -103,6 +103,13 @@ def executarExpressao(tokens_rpn):
     
     tokens = ['('] + tokens_rpn + [')']
     
+    def resolver_valor(val):
+        if isinstance(val, str):
+            if val == "RES":
+                return historico_res[-1] if historico_res else 0.0
+            return memoria_vars.get(val, 0.0)
+        return float(val)
+    
     for t in tokens:
         if t == '(':
             pilha_calc.append(t)
@@ -118,8 +125,11 @@ def executarExpressao(tokens_rpn):
 
             if len(elementos) == 1:
                 item = elementos[0]
-                if isinstance(item, str) and item.isupper() and item != "RES":
-                    pilha_calc.append(memoria_vars.get(item, 0.0))
+                if isinstance(item, str) and item.isupper():
+                    if item == "RES":
+                        pilha_calc.append(historico_res[-1] if historico_res else 0.0)
+                    else:
+                        pilha_calc.append(memoria_vars.get(item, 0.0))
                 else:
                     pilha_calc.append(item)
                     
@@ -127,9 +137,11 @@ def executarExpressao(tokens_rpn):
                 v, var_name = elementos[0], elementos[1]
                 
                 if var_name == "RES":
-                    n = int(v) if not isinstance(v, str) else 0
+                    n = int(v) if not isinstance(v, str) else 1
+                    if n <= 0:
+                        n = 1
                 
-                    idx = -(n + 1) 
+                    idx = -n 
 
                     if abs(idx) <= len(historico_res):
                         val = historico_res[idx]
@@ -139,16 +151,17 @@ def executarExpressao(tokens_rpn):
                     pilha_calc.append(val)
                     
                 elif isinstance(var_name, str) and var_name.isupper():
+                    # Gravação de variável
                     memoria_vars[var_name] = float(v)
                     pilha_calc.append(float(v))
                 else:
-                    raise ValueError(f"Erro: bloco inválido: {elementos}")
+                    raise ValueError(f"Erro: inválido: {elementos}")
             
             elif len(elementos) == 0:
                 pass 
                 
             else:
-                raise ValueError(f"Erro: malformada dentro dos parênteses: {elementos}")
+                raise ValueError(f"Erro: {elementos}")
                 
         elif t.replace('.', '', 1).isdigit():
             pilha_calc.append(float(t))
@@ -156,16 +169,25 @@ def executarExpressao(tokens_rpn):
         elif t in "+-*///%^":
             if len(pilha_calc) < 2 or pilha_calc[-1] == '(' or pilha_calc[-2] == '(':
                 raise ValueError(f"Erro: faltam operandos para '{t}'!")
-                
-            b = pilha_calc.pop()
-            a = pilha_calc.pop()
+            
+            b_raw = pilha_calc.pop()
+            a_raw = pilha_calc.pop()
+            
+            b = resolver_valor(b_raw)
+            a = resolver_valor(a_raw)
             
             if t == '+': pilha_calc.append(a + b)
             elif t == '-': pilha_calc.append(a - b)
             elif t == '*': pilha_calc.append(a * b)
-            elif t == '/': pilha_calc.append(a / b)
-            elif t == '//': pilha_calc.append(a // b)
-            elif t == '%': pilha_calc.append(a % b)
+            elif t == '/': 
+                if b == 0: raise ValueError("Divisão por zero!")
+                pilha_calc.append(a / b)
+            elif t == '//': 
+                if b == 0: raise ValueError("Divisão por zero!")
+                pilha_calc.append(a // b)
+            elif t == '%': 
+                if b == 0: raise ValueError("Divisão por zero!")
+                pilha_calc.append(a % b)
             elif t == '^': pilha_calc.append(a ** b)
             
         else:
@@ -174,11 +196,10 @@ def executarExpressao(tokens_rpn):
     if len(pilha_calc) != 1:
         raise ValueError(f"Erro: sobraram operandos na pilha! (Pilha: {pilha_calc})")
         
-    resultado_final = pilha_calc[0]
+    resultado_final = resolver_valor(pilha_calc[0])
     historico_res.append(resultado_final)
     
     return resultado_final
-
 
 # ------------------ aluno 3 ------------#
 
@@ -206,12 +227,11 @@ def is_number(s: str) -> bool:
     except ValueError:
         return False
 
-def gerarAssembly(tokens: list, codigoAssembly: list):
+def gerarAssembly(todas_linhas_tokens: list, codigoAssembly: list):
     secao_data = [
         ".data",
         "    @ Variaveis para comandos de memoria e historico",
-        "    var_mem: .space 8   @ 64 bits para MEM",
-        "    var_res: .space 8   @ 64 bits para RES"
+        "    var_res: .space 8   @ 64 bits para o historico RES"
     ]
     
     secao_text = [
@@ -222,44 +242,115 @@ def gerarAssembly(tokens: list, codigoAssembly: list):
     ]
 
     contador_const = 0
+    variaveis_criadas = set(["res"]) 
+    
+    for num_linha, tokens in enumerate(todas_linhas_tokens, 1):
+        secao_text.append(f"\n    @ ====== PROCESSANDO LINHA {num_linha} ======")
+        
+        pilha_asm = []
+        tokens_blocos = ['('] + tokens + [')']
 
-    for token in tokens:
-        if token in "()":
-            continue
-            
-        elif is_number(token):
-            nome_const = f"const_{contador_const}"
-            secao_data.append(f"    {nome_const}: .double {token}")
-            
-            secao_text.extend([
-                f"    @ --- Empilhando numero: {token} ---",
-                f"    ldr r0, ={nome_const}",
-                f"    vldr.f64 d0, [r0]",
-                f"    vpush {{d0}}"
-            ])
-            contador_const += 1
+        for token in tokens_blocos:
+            if token == '(':
+                pilha_asm.append(token)
+                
+            elif token == ')':
+                elementos = []
+                while pilha_asm and pilha_asm[-1] != '(':
+                    elementos.append(pilha_asm.pop())
+                elementos.reverse()
+                
+                if pilha_asm:
+                    pilha_asm.pop() 
 
-        elif token in ['+', '-', '*', '/']:
-            secao_text.extend([
-                f"    @ --- Operacao: {token} ---",
-                "    vpop {d0, d1}  @ d0 = op2 (topo), d1 = op1 (sub-topo)"
-            ])
-            
-            if token == '+': secao_text.append("    vadd.f64 d2, d1, d0")
-            elif token == '-': secao_text.append("    vsub.f64 d2, d1, d0")
-            elif token == '*': secao_text.append("    vmul.f64 d2, d1, d0")
-            elif token == '/': secao_text.append("    vdiv.f64 d2, d1, d0")
-            
-            secao_text.append("    vpush {d2}")
+                if len(elementos) == 1:
+                    item = elementos[0]
+                    if isinstance(item, str) and item.isupper() and item != "RES":
+                        if item not in variaveis_criadas:
+                            secao_data.append(f"    var_{item}: .space 8")
+                            variaveis_criadas.add(item)
+                            
+                        secao_text.extend([
+                            f"    @ --- Lendo da variavel {item} ---",
+                            f"    ldr r0, =var_{item}",
+                            "    vldr.f64 d0, [r0]",
+                            "    vpush {d0}"
+                        ])
+                        pilha_asm.append("VALOR_LIDO")
+                    else:
+                        pilha_asm.append(item)
+                        
+                elif len(elementos) == 2:
+                    v, var_name = elementos[0], elementos[1]
+                    
+                    if var_name == "RES":
+                        secao_text.extend([
+                            "    @ --- Comando RES (Puxando do historico) ---",
+                            "    ldr r0, =var_res",
+                            "    vldr.f64 d0, [r0]",
+                            "    vpush {d0}"
+                        ])
+                        pilha_asm.append("VALOR_RES")
+                        
+                    elif isinstance(var_name, str) and var_name.isupper():
+                        if var_name not in variaveis_criadas:
+                            secao_data.append(f"    var_{var_name}: .space 8")
+                            variaveis_criadas.add(var_name)
+                            
+                        secao_text.extend([
+                            f"    @ --- Gravando na variavel {var_name} ---",
+                            "    vpop {d0}               @ Puxa o valor do topo",
+                            f"    ldr r0, =var_{var_name} @ Pega o endereco da variavel",
+                            "    vstr.f64 d0, [r0]       @ Salva na memoria",
+                            "    vpush {d0}              @ Devolve pra pilha pra continuar"
+                        ])
+                        pilha_asm.append("VALOR_GRAVADO")
+                
+            elif is_number(token):
+                nome_const = f"const_{contador_const}"
+                secao_data.append(f"    {nome_const}: .double {token}")
+                
+                secao_text.extend([
+                    f"    @ --- Empilhando numero: {token} ---",
+                    f"    ldr r0, ={nome_const}",
+                    "    vldr.f64 d0, [r0]",
+                    "    vpush {d0}"
+                ])
+                contador_const += 1
+                pilha_asm.append(token)
 
-        elif token.isalpha() and token.isupper():
-            secao_text.extend([
-                f"    @ --- Comando Variavel: {token} (Leitura basica) ---",
-                f"    @ Requer implementacao do vstr para gravacao",
-            ])
+            elif token in ['+', '-', '*', '/', '//', '%', '^']:
+                secao_text.extend([
+                    f"    @ --- Operacao: {token} ---",
+                    "    vpop {d0, d1}  @ d0 = op2 (topo), d1 = op1 (sub-topo)"
+                ])
+                
+                if token == '+': secao_text.append("    vadd.f64 d2, d1, d0")
+                elif token == '-': secao_text.append("    vsub.f64 d2, d1, d0")
+                elif token == '*': secao_text.append("    vmul.f64 d2, d1, d0")
+                elif token == '/': secao_text.append("    vdiv.f64 d2, d1, d0")
+                elif token in ['//', '%', '^']:
+                    secao_text.extend([
+                        f"    @ OBS: ARM FPU puro nao tem instrucao nativa para '{token}'",
+                        "    @ Operacao bypassada pro resultado gerado pelo interpretador."
+                    ])
+                
+                secao_text.append("    vpush {d2}")
+                pilha_asm.append("RESULTADO")
+
+            elif token.isalpha() and token.isupper():
+                pilha_asm.append(token)
+
+        secao_text.extend([
+            f"    @ --- Salvando resultado final da Linha {num_linha} no historico (RES) ---",
+            "    vpop {d0}",
+            "    ldr r0, =var_res",
+            "    vstr.f64 d0, [r0]",
+            "    vpush {d0}   @ Devolve pro topo"
+        ])
 
     secao_text.extend([
-        "    @ --- Fim da execucao ---",
+        "\n    @ --- Fim da execucao de todo o arquivo ---",
         "_stop:",
         "    b _stop         @ Loop infinito para segurar a execucao no Cpulator"
     ])
@@ -268,18 +359,30 @@ def gerarAssembly(tokens: list, codigoAssembly: list):
     codigoAssembly.append("") 
     codigoAssembly.extend(secao_text)
 
+def testar_lexico():
+    testes = [
+        ("3.14 2.0 +", ['3.14', '2.0', '+']),
+        ("10 3 //", ['10', '3', '//'])
+    ]
+    for expressao, esperado in testes:
+        resultado = parseExpressao(expressao)
+        if resultado == esperado:
+            print(f"Lexer passou: '{expressao}'")
+        else:
+            print(f"Lexer falhou: '{expressao}'. Esperado {esperado}, gerou {resultado}")
+    print("-" * 40)
+
 
 if __name__ == "__main__":
-
     if len(sys.argv) < 2:
-        print("ERRO: Não foi passado o arquivo correto")
         sys.exit(1)
         
-    print("\n--- Começando a processar o arquivo de verdade ---")
+    testar_lexico()
 
     nome_arquivo = sys.argv[1]
-
     linhas_do_arquivo = lerArquivo(nome_arquivo)
+    
+    todas_as_linhas_tokens = []
 
     if linhas_do_arquivo:
         for linha in linhas_do_arquivo:
@@ -289,15 +392,21 @@ if __name__ == "__main__":
             try:
                 meus_tokens = parseExpressao(linha)
                 resultado = executarExpressao(meus_tokens)
+                print(f"Sucesso: {linha}  =>  {resultado:.1f}")
                 
-                codigo_asm = []
-                gerarAssembly(meus_tokens, codigo_asm)
-                
-                for linha_asm in codigo_asm:
-                    print(linha_asm)
-                print("-" * 40)
-                
+                todas_as_linhas_tokens.append(meus_tokens)
             except Exception as e:
                 print(f"Erro na linha '{linha}': {e}")
+                
+        if todas_as_linhas_tokens:
+            codigo_asm_completo = []
+            gerarAssembly(todas_as_linhas_tokens, codigo_asm_completo)
+   
+            nome_saida_asm = "saida_cpulator.s"
+            with open(nome_saida_asm, "w", encoding='utf-8') as f:
+                for linha_asm in codigo_asm_completo:
+                    f.write(linha_asm + "\n")
+                    
+            print(f"Arquivo Assembly '{nome_saida_asm}' gerado com sucesso!")
     else:
-        print("Nenhuma linha para processar (arquivo não encontrado, vazio ou com erro).")
+        print("Nenhuma linha para processar (arquivo não encontrado).")
