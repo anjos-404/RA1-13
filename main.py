@@ -79,10 +79,10 @@ def parseExpressao(linha: str):
             token += linha[i]
             i += 1
 
-        if token in ("RES", "MEM"):
+        if token.isalpha() and token.isupper():
             return token
 
-        raise ValueError(f"Comando inválido '{token}'")
+        raise ValueError(f"Comando ou Variável inválida '{token}' (deve ser 100% maiúscula)")
 
     while i < n:
         if linha[i].isspace():
@@ -96,30 +96,66 @@ def parseExpressao(linha: str):
 
 #--------------------- ALUNO 2 ---------------------------------#
 
-
 def executarExpressao(tokens_rpn):
     global historico_res, memoria_vars
     
     pilha_calc = []
     
-    for t in tokens_rpn:
-        if t in "()":
-            raise ValueError(f"Expressão RPN inválida: não deve conter '{t}'")
+    tokens = ['('] + tokens_rpn + [')']
+    
+    for t in tokens:
+        if t == '(':
+            pilha_calc.append(t)
+            
+        elif t == ')':
+            elementos = []
+            while pilha_calc and pilha_calc[-1] != '(':
+                elementos.append(pilha_calc.pop())
+            elementos.reverse() 
+            
+            if pilha_calc:
+                pilha_calc.pop() 
 
-        if t.replace('.', '', 1).isdigit():
+            if len(elementos) == 1:
+                item = elementos[0]
+                if isinstance(item, str) and item.isupper() and item != "RES":
+                    pilha_calc.append(memoria_vars.get(item, 0.0))
+                else:
+                    pilha_calc.append(item)
+                    
+            elif len(elementos) == 2:
+                v, var_name = elementos[0], elementos[1]
+                
+                if var_name == "RES":
+                    n = int(v) if not isinstance(v, str) else 0
+                
+                    idx = -(n + 1) 
+
+                    if abs(idx) <= len(historico_res):
+                        val = historico_res[idx]
+                    else:
+                        val = 0.0 
+                        
+                    pilha_calc.append(val)
+                    
+                elif isinstance(var_name, str) and var_name.isupper():
+                    memoria_vars[var_name] = float(v)
+                    pilha_calc.append(float(v))
+                else:
+                    raise ValueError(f"Erro: bloco inválido: {elementos}")
+            
+            elif len(elementos) == 0:
+                pass 
+                
+            else:
+                raise ValueError(f"Erro: malformada dentro dos parênteses: {elementos}")
+                
+        elif t.replace('.', '', 1).isdigit():
             pilha_calc.append(float(t))
             
-        elif t == "RES":
-            ultimo_valor = historico_res[-1] if historico_res else 0.0
-            pilha_calc.append(ultimo_valor)
-            
-        elif t == "MEM":
-            valor_salvo = memoria_vars.get("ultimo_salvo", 0.0)
-            pilha_calc.append(valor_salvo)
-            
         elif t in "+-*///%^":
-            if len(pilha_calc) < 2:
-                raise ValueError("Expressão errada: faltam operandos!")
+            if len(pilha_calc) < 2 or pilha_calc[-1] == '(' or pilha_calc[-2] == '(':
+                raise ValueError(f"Erro: faltam operandos para '{t}'!")
                 
             b = pilha_calc.pop()
             a = pilha_calc.pop()
@@ -132,14 +168,105 @@ def executarExpressao(tokens_rpn):
             elif t == '%': pilha_calc.append(a % b)
             elif t == '^': pilha_calc.append(a ** b)
             
+        else:
+            pilha_calc.append(t)
+            
     if len(pilha_calc) != 1:
-        raise ValueError(f"Expressão errada: sobraram operandos na pilha! (Pilha: {pilha_calc})")
+        raise ValueError(f"Erro: sobraram operandos na pilha! (Pilha: {pilha_calc})")
         
     resultado_final = pilha_calc[0]
-    
     historico_res.append(resultado_final)
     
     return resultado_final
+
+
+# ------------------ aluno 3 ------------#
+
+def lerArquivo(nomeArquivo: str) -> list:
+    linhas = []
+    try:
+        with open(nomeArquivo, 'r', encoding='utf-8') as arquivo:
+            for linha in arquivo:
+                linha_limpa = linha.strip()
+                if linha_limpa:
+                    linhas.append(linha_limpa)
+        return linhas 
+        
+    except FileNotFoundError:
+        print(f"Erro: O arquivo '{nomeArquivo}' não foi encontrado.")
+        return [] 
+    except Exception as e:
+        print(f"Erro: Falha inesperada ao ler o arquivo: {e}")
+        return []
+
+def is_number(s: str) -> bool:
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+def gerarAssembly(tokens: list, codigoAssembly: list):
+    secao_data = [
+        ".data",
+        "    @ Variaveis para comandos de memoria e historico",
+        "    var_mem: .space 8   @ 64 bits para MEM",
+        "    var_res: .space 8   @ 64 bits para RES"
+    ]
+    
+    secao_text = [
+        ".text",
+        ".global _start",
+        "_start:",
+        "    @ Inicializacao do programa"
+    ]
+
+    contador_const = 0
+
+    for token in tokens:
+        if token in "()":
+            continue
+            
+        elif is_number(token):
+            nome_const = f"const_{contador_const}"
+            secao_data.append(f"    {nome_const}: .double {token}")
+            
+            secao_text.extend([
+                f"    @ --- Empilhando numero: {token} ---",
+                f"    ldr r0, ={nome_const}",
+                f"    vldr.f64 d0, [r0]",
+                f"    vpush {{d0}}"
+            ])
+            contador_const += 1
+
+        elif token in ['+', '-', '*', '/']:
+            secao_text.extend([
+                f"    @ --- Operacao: {token} ---",
+                "    vpop {d0, d1}  @ d0 = op2 (topo), d1 = op1 (sub-topo)"
+            ])
+            
+            if token == '+': secao_text.append("    vadd.f64 d2, d1, d0")
+            elif token == '-': secao_text.append("    vsub.f64 d2, d1, d0")
+            elif token == '*': secao_text.append("    vmul.f64 d2, d1, d0")
+            elif token == '/': secao_text.append("    vdiv.f64 d2, d1, d0")
+            
+            secao_text.append("    vpush {d2}")
+
+        elif token.isalpha() and token.isupper():
+            secao_text.extend([
+                f"    @ --- Comando Variavel: {token} (Leitura basica) ---",
+                f"    @ Requer implementacao do vstr para gravacao",
+            ])
+
+    secao_text.extend([
+        "    @ --- Fim da execucao ---",
+        "_stop:",
+        "    b _stop         @ Loop infinito para segurar a execucao no Cpulator"
+    ])
+
+    codigoAssembly.extend(secao_data)
+    codigoAssembly.append("") 
+    codigoAssembly.extend(secao_text)
 
 
 if __name__ == "__main__":
@@ -147,21 +274,30 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("ERRO: Não foi passado o arquivo correto")
         sys.exit(1)
+        
+    print("\n--- Começando a processar o arquivo de verdade ---")
 
     nome_arquivo = sys.argv[1]
-    with open(nome_arquivo, "r", encoding='utf-8') as arquivo:
-        for linha in arquivo:
-            linha = linha.strip()
-            
-            if not linha or linha.startswith("#"):
+
+    linhas_do_arquivo = lerArquivo(nome_arquivo)
+
+    if linhas_do_arquivo:
+        for linha in linhas_do_arquivo:
+            if linha.startswith("#"):
                 continue
             
             try:
                 meus_tokens = parseExpressao(linha)
-                
                 resultado = executarExpressao(meus_tokens)
-
-                print(f"Correto: {linha}  =>  {resultado}")
+                
+                codigo_asm = []
+                gerarAssembly(meus_tokens, codigo_asm)
+                
+                for linha_asm in codigo_asm:
+                    print(linha_asm)
+                print("-" * 40)
                 
             except Exception as e:
-                print(f"Erro na linha: '{linha}': {e}")
+                print(f"Erro na linha '{linha}': {e}")
+    else:
+        print("Nenhuma linha para processar (arquivo não encontrado, vazio ou com erro).")
