@@ -142,6 +142,114 @@ def executarExpressao(tokens_rpn):
     return resultado_final
 
 
+# ------------------ aluno 3 ------------#
+
+def lerArquivo(nomeArquivo: str, linhas: list) -> bool:
+    
+    try:
+        with open(nomeArquivo, 'r', encoding='utf-8') as arquivo:
+            for linha in arquivo:
+                linha_limpa = linha.strip()
+                if linha_limpa:
+                    linhas.append(linha_limpa)
+        return True
+    except FileNotFoundError:
+        print(f" O arquivo '{nomeArquivo}' não foi encontrado.")
+        return False
+    except Exception as e:
+        print(f" Falha ao ler o arquivo: {e}")
+        return False
+
+def is_number(s: str) -> bool:
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+def gerarAssembly(tokens: list, codigoAssembly: list):
+    secao_data = [
+        ".data",
+        "    @ Variaveis para comandos de memoria e historico",
+        "    var_mem: .space 8   @ 64 bits para MEM",
+        "    var_res: .space 8   @ 64 bits para RES"
+    ]
+    
+
+    secao_text = [
+        ".text",
+        ".global _start",
+        "_start:",
+        "    @ Inicializacao do programa"
+    ]
+
+    contador_const = 0
+
+    for token in tokens:
+        if is_number(token):
+   
+            nome_const = f"const_{contador_const}"
+            secao_data.append(f"    {nome_const}: .double {token}")
+            
+     
+            secao_text.extend([
+                f"    @ --- Empilhando numero: {token} ---",
+                f"    ldr r0, ={nome_const}",
+                f"    vldr.f64 d0, [r0]",
+                f"    vpush {{d0}}"
+            ])
+            contador_const += 1
+
+        elif token in ['+', '-', '*', '/']:
+          
+            secao_text.extend([
+                f"    @ --- Operacao: {token} ---",
+                "    vpop {d0, d1}  @ d0 = op2 (topo), d1 = op1 (sub-topo)"
+            ])
+            
+            if token == '+':
+                secao_text.append("    vadd.f64 d2, d1, d0")
+            elif token == '-':
+                secao_text.append("    vsub.f64 d2, d1, d0")
+            elif token == '*':
+                secao_text.append("    vmul.f64 d2, d1, d0")
+            elif token == '/':
+                secao_text.append("    vdiv.f64 d2, d1, d0")
+            
+            #
+            secao_text.append("    vpush {d2}")
+
+        elif token == 'MEM':
+            secao_text.extend([
+                "    @ --- Comando: MEM ---",
+                "    ldr r0, =var_mem",
+                "    vldr.f64 d0, [r0]",
+                "    vpush {d0}"
+            ])
+            
+        elif token == 'RES':
+     
+            secao_text.extend([
+                "    @ --- Comando: RES ---",
+                "    ldr r0, =var_res",
+                "    vldr.f64 d0, [r0]",
+                "    vpush {d0}"
+            ])
+
+    secao_text.extend([
+        "    @ --- Fim da execucao ---",
+        "_stop:",
+        "    b _stop"
+    ])
+
+    codigoAssembly.extend(secao_data)
+    codigoAssembly.append("") 
+    codigoAssembly.extend(secao_text)
+
+
+
+
+
 if __name__ == "__main__":
 
     if len(sys.argv) < 2:
@@ -151,17 +259,11 @@ if __name__ == "__main__":
     nome_arquivo = sys.argv[1]
     with open(nome_arquivo, "r", encoding='utf-8') as arquivo:
         for linha in arquivo:
-            linha = linha.strip()
-            
-            if not linha or linha.startswith("#"):
-                continue
-            
+            linha = linha.strip()        
             try:
                 meus_tokens = parseExpressao(linha)
-                
                 resultado = executarExpressao(meus_tokens)
 
                 print(f"Correto: {linha}  =>  {resultado}")
-                
             except Exception as e:
                 print(f"Erro na linha: '{linha}': {e}")
