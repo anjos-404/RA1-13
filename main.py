@@ -470,6 +470,7 @@ if __name__ == "__main__":
             try:
                 meus_tokens = parseExpressao(linha)
                 resultado = executarExpressao(meus_tokens)
+                print(f" Sucesso: {linha}  =>  {resultado}")
                 
                 resultados_para_exibir.append((linha, resultado))
                 todas_as_linhas_tokens.append(meus_tokens)
