@@ -1,0 +1,6 @@
+( 50 VARA )
+( 10 EXTRA )
+( VARA ) ( EXTRA ) +
+( 1 RES ) 2 *
+( ( 3 RES ) SALVO )
+( SALVO )
